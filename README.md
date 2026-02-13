@@ -1,6 +1,6 @@
-# Smart Breeder Farm
+# Full stack app starter kit
 
-A smart breeder farm management system built for farm owners to manage their farm operations.
+A full stack app starter kit built with React, Express, TypeScript, and Tailwind CSS with a monorepo structure.
 
 ## Tech Stack
 
