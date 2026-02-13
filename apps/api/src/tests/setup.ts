@@ -27,10 +27,27 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+function isMissingRelationError(err: unknown): boolean {
+  const prismaError = err as { code?: string; meta?: { code?: string } };
+  return prismaError?.code === 'P2010' && prismaError?.meta?.code === '42P01';
+}
+
 beforeEach(async () => {
-  // Truncate all tables in one command (CASCADE handles foreign keys)
-  // Include files table to clean up file records between tests
-  await prisma.$executeRawUnsafe(
-    `TRUNCATE TABLE files, users, sessions, accounts, verifications RESTART IDENTITY CASCADE`
-  );
+  // Truncate all tables (CASCADE handles foreign keys). If some tables don't exist
+  // (test DB not pushed or empty), try auth-only truncate; if that also fails, skip.
+  try {
+    await prisma.$executeRawUnsafe(
+      `TRUNCATE TABLE files, users, sessions, accounts, verifications RESTART IDENTITY CASCADE`
+    );
+  } catch (err: unknown) {
+    if (!isMissingRelationError(err)) throw err;
+    try {
+      await prisma.$executeRawUnsafe(
+        `TRUNCATE TABLE users, sessions, accounts, verifications RESTART IDENTITY CASCADE`
+      );
+    } catch (fallbackErr: unknown) {
+      if (!isMissingRelationError(fallbackErr)) throw fallbackErr;
+      // No tables exist (e.g. test DB schema not pushed); skip truncate
+    }
+  }
 });

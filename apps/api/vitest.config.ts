@@ -2,8 +2,8 @@ import { defineConfig } from 'vitest/config';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 
-// Load test.env from root
-config({ path: resolve(__dirname, '../../test.env') });
+// Load .env.test so tests use same DB as test:db:push
+config({ path: resolve(__dirname, '.env.test') });
 
 export default defineConfig({
   test: {

@@ -14,7 +14,7 @@
     "db:migrate": "dotenv -e ../../apps/api/.env -- prisma migrate dev --schema=prisma/schema",
     "db:studio": "dotenv -e ../../apps/api/.env -- prisma studio --schema=prisma/schema",
     "db:seed": "dotenv -e ../../apps/api/.env -- tsx src/seed.ts",
-    "test:db:push": "dotenv -e ../../apps/api/test.env -- npx prisma db push --schema=prisma/schema",
+    "test:db:push": "dotenv -e ../../apps/api/.env.test -- npx prisma db push --schema=prisma/schema",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
