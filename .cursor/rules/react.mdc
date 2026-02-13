@@ -1,0 +1,471 @@
+---
+description: React development patterns and best practices
+globs: apps/web/**/*.{ts,tsx}
+---
+
+# React Development Rules
+
+## Component Structure
+
+- Use functional components with TypeScript
+- Place component files in `src/components/` or feature-specific folders
+- Co-locate related files (component, styles, tests, types)
+- Use named exports for components
+
+```tsx
+// Good: Named export with TypeScript
+export function UserCard({ user }: UserCardProps) {
+  return <div>{user.name}</div>;
+}
+
+// Avoid: Default exports
+export default function UserCard() {}
+```
+
+## Component Organization
+
+```
+src/
+├── components/        # Reusable components (app-specific)
+│   └── [feature]/    # Feature-specific components
+├── routes/           # TanStack Router file-based routes
+│   ├── __root.tsx    # Root route with context
+│   ├── index.tsx     # Home page (/)
+│   ├── (app)/        # Pathless layout group
+│   │   ├── route.tsx # Layout component
+│   │   └── dashboard.tsx
+│   └── (auth)/       # Pathless layout group
+│       ├── route.tsx # Auth layout
+│       └── sign-in.tsx
+├── hooks/            # TanStack Query hooks
+│   ├── queries/      # Query and mutation hooks
+│   │   ├── query-keys.ts
+│   │   ├── use-users.ts
+│   │   ├── use-files.ts
+│   │   └── index.ts
+│   └── index.ts
+├── lib/              # Utilities and helpers (app-specific)
+└── types/            # TypeScript types
+```
+
+**Note:** All reusable UI components (Shadcn) are located in the `@repo/ui` package at `packages/ui/src/components/`. See the "UI Components" section below.
+
+## State Management
+
+- Use TanStack Query (`@tanstack/react-query`) for server state
+- Use `useState` and `useReducer` for local UI state
+- TanStack Query cache acts as global server state - no need for Redux/Zustand for API data
+- Lift state only when necessary
+
+```tsx
+// Server state: Use query hooks from @/hooks
+const { data: user, isLoading } = useCurrentUser();
+const { data: users } = useUsers({ page: 1, pageSize: 10 });
+
+// Local UI state
+const [isOpen, setIsOpen] = useState(false);
+```
+
+## Data Fetching with TanStack Query
+
+### Hook Structure
+
+Query hooks are organized in `src/hooks/queries/`:
+
+```
+src/hooks/
+├── queries/
+│   ├── query-keys.ts    # Centralized query key factory
+│   ├── use-users.ts     # User-related queries & mutations
+│   ├── use-files.ts     # File-related queries & mutations
+│   └── index.ts         # Re-exports all hooks
+└── index.ts             # Main export
+```
+
+### Using Query Hooks
+
+```tsx
+import { useCurrentUser, useUsers, useUpdateCurrentUser } from '@/hooks';
+
+function Profile() {
+  // Queries - data is cached and shared across components
+  const { data: user, isLoading, error } = useCurrentUser();
+  const { data: usersData } = useUsers({ page: 1, pageSize: 10 });
+
+  // Mutations - with automatic cache invalidation
+  const updateUser = useUpdateCurrentUser({
+    onSuccess: () => toast({ title: 'Profile updated!' }),
+    onError: (error) => toast({ title: error.message, variant: 'destructive' }),
+  });
+
+  const handleSubmit = (data: UpdateUserInput) => {
+    updateUser.mutate(data);
+  };
+}
+```
+
+### Query Keys Factory
+
+Always use the centralized query keys from `@/hooks/queries/query-keys.ts`:
+
+```tsx
+import { queryKeys } from '@/hooks';
+
+// For manual cache operations
+const queryClient = useQueryClient();
+
+// Invalidate all user queries
+queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
+
+// Invalidate specific user
+queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(userId) });
+
+// Read from cache
+const cachedUser = queryClient.getQueryData(queryKeys.users.me());
+
+// Prefetch data
+queryClient.prefetchQuery({
+  queryKey: queryKeys.users.me(),
+  queryFn: fetchCurrentUser,
+});
+```
+
+### Creating New Query Hooks
+
+When adding new query hooks, follow this pattern:
+
+```tsx
+// src/hooks/queries/use-posts.ts
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api';
+import { queryKeys } from './query-keys';
+import type { Post, ApiError } from '@repo/shared';
+
+// Query hook
+export function usePosts(params?: PaginationParams) {
+  return useQuery({
+    queryKey: queryKeys.posts.list(params),
+    queryFn: async (): Promise<PaginatedResponse<Post>> => {
+      const result = await apiClient.get<PaginatedResponse<Post>>('/posts');
+      if (!result.success) throw result.error;
+      return result.data!;
+    },
+  });
+}
+
+// Mutation hook with cache invalidation
+export function useCreatePost() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (data: CreatePostInput): Promise<Post> => {
+      const result = await apiClient.post<Post>('/posts', data);
+      if (!result.success) throw result.error;
+      return result.data!;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.posts.lists() });
+    },
+  });
+}
+```
+
+Add query keys to `query-keys.ts`:
+
+```tsx
+export const queryKeys = {
+  // ... existing keys
+  posts: {
+    all: ['posts'] as const,
+    lists: () => [...queryKeys.posts.all, 'list'] as const,
+    list: (params?: PaginationParams) => [...queryKeys.posts.lists(), params] as const,
+    details: () => [...queryKeys.posts.all, 'detail'] as const,
+    detail: (id: string) => [...queryKeys.posts.details(), id] as const,
+  },
+};
+```
+
+### Handling Mutation Errors
+
+```tsx
+const updateUser = useUpdateCurrentUser({
+  onError: (error) => {
+    // error is typed as ApiError { code, message, details? }
+    toast({
+      variant: 'destructive',
+      title: error.code,
+      description: error.message,
+    });
+  },
+});
+
+// Or with try/catch using mutateAsync
+const handleSubmit = async (data: UpdateUserInput) => {
+  try {
+    await updateUser.mutateAsync(data);
+  } catch (error) {
+    // error is ApiError
+    console.error(error.code, error.message);
+  }
+};
+```
+
+### Cache Behavior
+
+- **staleTime: 5 minutes** - Data is fresh for 5 minutes, no refetch
+- **Multiple components, same hook** - Share cached data, single request
+- **Automatic deduplication** - Concurrent requests are deduplicated
+- **Background refetch** - Stale data triggers background refetch
+
+```tsx
+// Component A
+const { data } = useCurrentUser(); // API call
+
+// Component B (same time or within 5 min)
+const { data } = useCurrentUser(); // Uses cache, no API call
+```
+
+## Form Handling
+
+- Use `react-hook-form` with Zod validation
+- Import validators from `@repo/shared/validators`
+- Use `@hookform/resolvers/zod` for integration
+
+```tsx
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { signUpSchema, type SignUpInput } from '@repo/shared/validators';
+
+const form = useForm<SignUpInput>({
+  resolver: zodResolver(signUpSchema),
+});
+```
+
+## Routing
+
+- Use TanStack Router with file-based routing
+- Routes are defined in `src/routes/` directory
+- Pathless layouts use parentheses: `(app)`, `(auth)` - these don't add to the URL path
+- Root route at `__root.tsx` defines router context
+- Layout routes use `route.tsx` files within pathless groups
+- Navigation uses `Link` and `useNavigate` from `@tanstack/react-router`
+- Route tree is auto-generated to `routeTree.gen.ts` by the Vite plugin
+
+**File-based Route Structure:**
+```
+routes/
+├── __root.tsx          # Root route with context
+├── index.tsx           # Home page (/)
+├── (app)/              # Pathless layout group
+│   ├── route.tsx       # Layout component
+│   └── dashboard.tsx   # /dashboard route
+└── (auth)/             # Pathless layout group
+    ├── route.tsx       # Auth layout
+    └── sign-in.tsx     # /sign-in route
+```
+
+**Basic Route:**
+```tsx
+import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/')({
+  component: HomePage,
+});
+
+function HomePage() {
+  return <div>Welcome Home!</div>;
+}
+```
+
+**Layout Route:**
+```tsx
+import { createFileRoute, Outlet } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/(app)')({
+  component: LayoutComponent,
+});
+
+function LayoutComponent() {
+  return (
+    <div>
+      <header>Navigation</header>
+      <Outlet /> {/* Child routes render here */}
+    </div>
+  );
+}
+```
+
+**Navigation:**
+```tsx
+import { Link, useNavigate } from '@tanstack/react-router';
+
+// Using Link component
+<Link to="/dashboard">Go to Dashboard</Link>
+<Link to="/sign-in" className="underline">Sign In</Link>
+
+// Programmatic navigation
+const navigate = useNavigate();
+navigate({ to: '/dashboard', replace: true });
+```
+
+## UI Components from @repo/ui
+
+All Shadcn UI components are located in the `@repo/ui` package and use individual file imports:
+
+```tsx
+// Import UI components (individual imports)
+import { Button } from '@repo/ui/components/button';
+import { Card, CardContent, CardHeader } from '@repo/ui/components/card';
+import { Input } from '@repo/ui/components/input';
+import { Label } from '@repo/ui/components/label';
+
+// Import utilities
+import { cn } from '@repo/ui/lib/utils';
+
+// Import hooks
+import { useToast } from '@repo/ui/hooks/use-toast';
+```
+
+**Component Location:**
+- UI components: `packages/ui/src/components/`
+- Utilities: `packages/ui/src/lib/utils.ts` (includes `cn()`)
+- Hooks: `packages/ui/src/hooks/use-toast.ts`
+- Styles: `packages/ui/src/styles.css` (imported in `apps/web/src/index.css`)
+
+**Adding New Shadcn Components:**
+
+Use the convenient pnpm command from the root of the monorepo:
+
+```bash
+# Add a single component
+pnpm shadcn add [component-name]
+
+# Add multiple components
+pnpm shadcn add dialog select sheet
+
+# Examples
+pnpm shadcn add dialog
+pnpm shadcn add select sheet accordion
+```
+
+The component will be automatically added to `packages/ui/src/components/` and will be immediately available via `@repo/ui/components/[component-name]`. No need to update `package.json` - wildcard exports handle it automatically.
+
+The `components.json` file in `packages/ui` is already configured for shadcn CLI usage.
+
+## Styling with Tailwind
+
+- Use Tailwind utility classes
+- Use Shadcn UI components from `@repo/ui/components/*`
+- Use the `cn()` utility from `@repo/ui/lib/utils` for conditional classes
+- CSS variables and Tailwind theme are shared via `@repo/ui/styles.css`
+
+```tsx
+import { cn } from '@repo/ui/lib/utils';
+
+<div className={cn(
+  'rounded-lg border bg-card',
+  isActive && 'border-primary',
+  className
+)} />
+```
+
+## TypeScript Patterns
+
+- Define prop types with interfaces
+- Use `type` for unions and intersections
+- Import shared types from `@repo/shared`
+- Avoid `any`, use `unknown` when necessary
+
+```tsx
+interface UserCardProps {
+  user: User;
+  onSelect?: (user: User) => void;
+  className?: string;
+}
+```
+
+## Performance
+
+- Memoize expensive computations with `useMemo`
+- Memoize callbacks with `useCallback` when passed to optimized children
+- Use React.lazy for code splitting
+- Avoid premature optimization
+
+## Error Handling
+
+- Use error boundaries for component errors
+- Handle async errors with try/catch
+- Display user-friendly error messages
+- Use the toast system for notifications
+
+```tsx
+import { useToast } from '@repo/ui/hooks/use-toast';
+
+const { toast } = useToast();
+
+try {
+  await mutateAsync(data);
+  toast({ title: 'Success', description: 'Changes saved' });
+} catch (error) {
+  toast({ title: 'Error', description: 'Failed to save', variant: 'destructive' });
+}
+```
+
+## Authentication
+
+- Use `useSession()` from `@repo/auth/client` for component-level auth state
+- Protect routes using `beforeLoad` in route definitions
+- Router context is defined in `__root.tsx` and available in all routes
+- Use `redirect()` from TanStack Router for auth redirects
+
+**Router Context Setup (__root.tsx):**
+```tsx
+import { createRootRoute, Outlet } from '@tanstack/react-router';
+import { authClient } from '@/lib/auth';
+
+export const Route = createRootRoute({
+  context: () => ({
+    auth: authClient,
+  }),
+  component: RootComponent,
+});
+```
+
+**Protected Route with beforeLoad:**
+```tsx
+import { createFileRoute, redirect } from '@tanstack/react-router';
+import { authClient } from '@/lib/auth';
+
+export const Route = createFileRoute('/(app)/dashboard')({
+  beforeLoad: async ({ context }: { context: { auth: typeof authClient } }) => {
+    // Check authentication
+    const result = await context.auth.getSession();
+    if (result.error || !result.data?.user) {
+      throw redirect({
+        to: '/sign-in',
+        search: {
+          redirect: '/dashboard',
+        },
+      });
+    }
+  },
+  component: DashboardPage,
+});
+```
+
+**Using Session in Components:**
+```tsx
+import { useSession, signIn, signOut } from '@/lib/auth';
+
+function MyComponent() {
+  const { data: session, isPending } = useSession();
+
+  if (isPending) return <LoadingSpinner />;
+  if (!session?.user) {
+    // Handle unauthenticated state
+    return <div>Please sign in</div>;
+  }
+
+  return <div>Welcome, {session.user.name}!</div>;
+}
+```

@@ -1,0 +1,178 @@
+---
+description: General development patterns for the monorepo
+globs: **/*.{ts,tsx,js}
+---
+
+# General Development Rules
+
+## Monorepo Structure
+
+```
+/apps
+  /web        → React frontend (Vite)
+  /api        → Express.js backend
+
+/packages
+  /db         → Prisma schema + client
+  /auth       → Better Auth configuration
+  /shared     → Types, validators, utilities
+  /config     → ESLint, TypeScript, env configs
+```
+
+## Package Imports
+
+Always use workspace package imports:
+
+```ts
+// Good: Import from workspace packages
+import { prisma } from '@repo/db';
+import { auth } from '@repo/auth';
+import { signInSchema } from '@repo/shared/validators';
+import type { User } from '@repo/shared/types';
+
+// Avoid: Relative imports across packages
+import { prisma } from '../../../packages/db';
+```
+
+## TypeScript Configuration
+
+- Extend from `@repo/config/typescript/*`
+- Use strict mode
+- Enable `noUncheckedIndexedAccess`
+
+```json
+{
+  "extends": "@repo/config/typescript/react",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  }
+}
+```
+
+## Shared Types
+
+Define and export types from `@repo/shared`:
+
+```ts
+// packages/shared/src/types/user.ts
+export interface User {
+  id: string;
+  email: string;
+  name: string | null;
+}
+
+// Use in any app
+import type { User } from '@repo/shared/types';
+```
+
+## Shared Validators
+
+Use Zod schemas from `@repo/shared/validators`:
+
+```ts
+// packages/shared/src/validators/user.ts
+import { z } from 'zod';
+
+export const signUpSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  name: z.string().min(2).optional(),
+});
+
+export type SignUpInput = z.infer<typeof signUpSchema>;
+```
+
+## Environment Variables
+
+- Define schema in `@repo/config/env.ts`
+- Create `.env` from `.env.example`
+- Never commit `.env` files
+
+Required variables:
+- `DATABASE_URL` - PostgreSQL connection string
+- `BETTER_AUTH_SECRET` - Auth secret (min 32 chars)
+- `BETTER_AUTH_URL` - Frontend URL
+- `PORT` - API server port
+- `VITE_API_URL` - API URL for frontend
+
+## Turbo Commands
+
+```bash
+# Development
+pnpm dev          # Start all apps
+pnpm dev --filter @repo/web   # Start only web
+
+# Building
+pnpm build        # Build all
+pnpm build --filter @repo/api # Build only api
+
+# Database
+pnpm db:generate  # Generate Prisma client
+pnpm db:push      # Push schema to database
+pnpm db:studio    # Open Prisma Studio
+
+# Quality
+pnpm lint         # Lint all packages
+pnpm typecheck    # Type check all packages
+pnpm format       # Format with Prettier
+```
+
+## Git Workflow
+
+- Use conventional commits
+- Branch naming: `feature/`, `fix/`, `chore/`
+- Keep commits atomic and focused
+
+```bash
+feat: add user profile page
+fix: resolve auth redirect loop
+chore: update dependencies
+```
+
+## Code Style
+
+- Use ESLint configs from `@repo/config/eslint/*`
+- Use Prettier for formatting
+- Prefer `const` over `let`
+- Use explicit return types for exported functions
+
+```ts
+// Good: Explicit return type
+export function formatDate(date: Date): string {
+  return date.toLocaleDateString();
+}
+
+// Good: Type inference for internal functions
+const formatInternal = (date: Date) => date.toLocaleDateString();
+```
+
+## Error Handling
+
+- Use Result type from `@repo/shared/utils` for operations that can fail
+- Throw errors for exceptional cases
+- Always provide meaningful error messages
+
+```ts
+import { ok, err, type Result } from '@repo/shared/utils';
+
+function parseConfig(input: string): Result<Config, Error> {
+  try {
+    return ok(JSON.parse(input));
+  } catch {
+    return err(new Error('Invalid JSON'));
+  }
+}
+```
+
+## Performance Guidelines
+- Import only what you need
+- Use dynamic imports for large dependencies
+- Implement pagination for list endpoints
+- Cache expensive computations
+
+## Security Guidelines
+- Never log sensitive data (passwords, tokens)
+- Validate all user inputs
+- Use HTTPS in production
+- Keep dependencies updated

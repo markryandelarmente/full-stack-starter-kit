@@ -1,0 +1,417 @@
+---
+description: Express.js backend API patterns and best practices
+globs: apps/api/**/*.ts
+---
+
+# Backend API Development Rules
+
+## Project Structure
+
+```
+apps/api/src/
+├── index.ts              # App entry point
+├── routes/               # Route definitions (URL mappings)
+│   ├── index.ts          # Route aggregation
+│   └── [resource].routes.ts
+├── controllers/          # HTTP request/response handlers
+│   ├── index.ts
+│   └── [resource].controller.ts
+├── services/             # Business logic layer
+│   ├── index.ts
+│   └── [resource].service.ts
+├── repositories/         # Data access layer
+│   ├── index.ts
+│   └── [resource].repository.ts
+├── middleware/           # Express middleware
+│   ├── auth.ts
+│   └── error-handler.ts
+├── lib/                  # Utilities
+│   ├── errors.ts
+│   └── validate.ts
+└── tests/                # Tests
+    ├── index.ts
+    ├── fixtures/
+    │   ├── index.ts
+    │   └── [resource].fixture.ts
+    ├── helpers/
+    ├── mocks/
+    ├── utils/
+    ├── integrations/
+    │   └── [resource].test.ts
+    └── unit/
+        ├── index.ts
+        └── [resource].test.ts
+```
+
+## Layer Responsibilities
+
+```
+Route → Controller → Service → Repository → Database
+```
+
+| Layer | Responsibility |
+|-------|----------------|
+| **Routes** | URL definitions, middleware chain, maps to controllers |
+| **Controllers** | Parse request, call services, format response |
+| **Services** | Business logic, validation, orchestrates repositories |
+| **Repositories** | Data access, Prisma queries, database operations and should be 1 to 1 with the database table |
+
+## Express 5 Async Error Handling
+
+Express 5 automatically catches errors from async functions and passes them to the error middleware. **No try-catch blocks needed in controllers.**
+
+```ts
+// ✅ Express 5 - clean, no try-catch needed
+export async function getById(req: Request, res: Response) {
+  const user = await userService.getById(req.params.id);
+  res.json({ success: true, data: user });
+}
+
+// ❌ Old Express 4 pattern - unnecessary in Express 5
+export async function getById(req: Request, res: Response, next: NextFunction) {
+  try {
+    const user = await userService.getById(req.params.id);
+    res.json({ success: true, data: user });
+  } catch (error) {
+    next(error);
+  }
+}
+```
+
+## Routes
+
+Routes define URL mappings and middleware. Keep them minimal.
+
+```ts
+// routes/user.routes.ts
+import { Router } from 'express';
+import { userController } from '../controllers';
+import { requireAuth } from '../middleware/auth';
+import { validate } from '../lib/validate';
+import { updateUserSchema, paginationSchema } from '@repo/shared/validators';
+
+export const userRoutes = Router();
+
+userRoutes.get('/', requireAuth, validate(paginationSchema, 'query'), userController.list);
+userRoutes.get('/me', requireAuth, userController.me);
+userRoutes.get('/:id', requireAuth, userController.getById);
+userRoutes.patch('/me', requireAuth, validate(updateUserSchema, 'body'), userController.update);
+userRoutes.delete('/:id', requireAuth, userController.deleteById);
+```
+
+```ts
+// routes/index.ts
+import { Router } from 'express';
+import { userRoutes } from './user.routes';
+
+export const apiRouter = Router();
+apiRouter.use('/users',requireAuth, userRoutes);
+```
+
+## Controllers (Functional)
+
+Controllers handle HTTP concerns. Express 5 catches async errors automatically.
+
+```ts
+// controllers/user.controller.ts
+import type { Request, Response } from 'express';
+import { userService } from '../services';
+
+export async function list(req: Request, res: Response) {
+  const result = await userService.list(req.query as { page: number; pageSize: number });
+  res.json({ success: true, data: result });
+}
+
+export async function me(req: Request, res: Response) {
+  const user = await userService.getById(req.user!.id);
+  res.json({ success: true, data: user });
+}
+
+export async function getById(req: Request, res: Response) {
+  const user = await userService.getById(req.params.id);
+  res.json({ success: true, data: user });
+}
+
+export async function update(req: Request, res: Response) {
+  const user = await userService.update(req.user!.id, req.body);
+  res.json({ success: true, data: user });
+}
+
+export async function deleteById(req: Request, res: Response) {
+  await userService.deleteById(req.params.id);
+  res.json({ success: true, data: null });
+}
+```
+
+```ts
+// controllers/index.ts
+export * as userController from './user.controller';
+```
+
+## Services (Functional)
+
+Services contain business logic. Throw errors - they bubble up to error middleware.
+
+```ts
+// services/user.service.ts
+import { userRepository } from '../repositories';
+import { ApiError } from '../lib/errors';
+
+export async function getById(id: string) {
+  const user = await userRepository.findById(id);
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+  return user;
+}
+
+export async function getByEmail(email: string) {
+  return userRepository.findByEmail(email);
+}
+
+export async function list(pagination: { page: number; pageSize: number }) {
+  const { page, pageSize } = pagination;
+  const skip = (page - 1) * pageSize;
+
+  const [users, total] = await Promise.all([
+    userRepository.findMany({ skip, take: pageSize }),
+    userRepository.count(),
+  ]);
+
+  return {
+    items: users,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
+}
+
+export async function update(id: string, data: { name?: string; image?: string }) {
+  await getById(id); // Verify exists
+  return userRepository.update(id, data);
+}
+
+export async function deleteById(id: string) {
+  await getById(id); // Verify exists
+  return userRepository.deleteById(id);
+}
+```
+
+```ts
+// services/index.ts
+export * as userService from './user.service';
+```
+
+## Repositories (Functional)
+
+Repositories handle data access. All functions accept an optional transaction client (`tx`) as the last parameter, defaulting to the main Prisma client. This enables transaction support.
+
+```ts
+// repositories/user.repository.ts
+import { prisma } from '@repo/db';
+import type { Prisma, PrismaClient } from '@repo/db';
+
+// Transaction client type - works with both PrismaClient and transaction
+type TxClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+export async function findById(id: string, tx: TxClient = prisma): Promise<User | null> {
+  return tx.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      image: true,
+      emailVerified: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+}
+
+export async function create(data: Prisma.UserCreateInput, tx: TxClient = prisma): Promise<User> {
+  return tx.user.create({ data });
+}
+
+export async function update(id: string, data: Prisma.UserUpdateInput, tx: TxClient = prisma): Promise<User> {
+  return tx.user.update({ where: { id }, data });
+}
+
+export async function deleteById(id: string, tx: TxClient = prisma): Promise<User> {
+  return tx.user.delete({ where: { id } });
+}
+```
+
+```ts
+// repositories/index.ts
+export * as userRepository from './user.repository';
+```
+
+### Using Transactions
+
+```ts
+// In service layer - wrap multiple operations in a transaction
+import { prisma } from '@repo/db';
+
+export async function transferCredits(fromId: string, toId: string, amount: number): Promise<void> {
+  return prisma.$transaction(async (tx) => {
+    const sender = await userRepository.findById(fromId, tx);
+    if (!sender || sender.credits < amount) {
+      throw ApiError.badRequest('Insufficient credits');
+    }
+    
+    await userRepository.update(fromId, { credits: { decrement: amount } }, tx);
+    await userRepository.update(toId, { credits: { increment: amount } }, tx);
+  });
+}
+```
+
+## Global Error Handler
+
+Express 5 catches all async errors and passes them here.
+
+```ts
+// middleware/error-handler.ts
+import type { Request, Response, NextFunction } from 'express';
+import { ApiError } from '../lib/errors';
+
+export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction) {
+  console.error('Error:', err);
+
+  if (err instanceof ApiError) {
+    res.status(err.statusCode).json({
+      success: false,
+      error: { code: err.code, message: err.message, details: err.details },
+    });
+    return;
+  }
+
+  res.status(500).json({
+    success: false,
+    error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' },
+  });
+}
+```
+
+## API Response Format
+
+```ts
+// Success
+res.json({ success: true, data: result });
+
+// Paginated
+res.json({
+  success: true,
+  data: { items, total, page, pageSize, totalPages },
+});
+
+// Error (via middleware)
+{ success: false, error: { code: 'NOT_FOUND', message: 'User not found' } }
+```
+
+## Error Classes
+
+```ts
+import { ApiError } from '../lib/errors';
+
+throw ApiError.notFound('User not found');
+throw ApiError.badRequest('Invalid email', { field: 'email' });
+throw ApiError.unauthorized('Invalid credentials');
+throw ApiError.forbidden('Access denied');
+throw ApiError.conflict('Email already exists');
+```
+
+## Validation
+
+```ts
+import { validate } from '../lib/validate';
+import { createUserSchema } from '@repo/shared/validators';
+
+router.post('/', validate(createUserSchema, 'body'), userController.create);
+```
+
+## Authentication
+
+```ts
+import { requireAuth, optionalAuth } from '../middleware/auth';
+
+router.get('/me', requireAuth, userController.me);
+router.get('/public', optionalAuth, postController.list);
+```
+
+## Testing
+
+### tests folder structure and purpose
+
+- fixtures are used to create data for the tests
+- helpers are used to create helpers for the tests
+- mocks are used to mock the dependencies
+- utils are used to create utility functions for the tests
+- integrations are used to test the integration of the code like routes, middleware, etc.
+- unit are used to test the unit of the code like services, repositories, etc.
+
+### example of a integration test
+```ts
+import { vi, describe, it, expect } from 'vitest';
+import * as userController from '../controllers/user.controller';
+
+describe('Integration Test for users API routes', () => {
+  describe('GET /api/users/:id', () => {
+    describe('Success Scenario', () => {
+      it('returns user when user exists', async () => {
+        vi.mocked(userRepository.findById).mockResolvedValue(userFixture);
+        await expect(userController.getById('123')).resolves.toEqual(userFixture);
+      });
+    });
+    describe('Validation Error Scenario', () => {
+      it('returns 400 when id is not a string', async () => {
+        await expect(userController.getById(123 as unknown as string)).resolves.toEqual(400);
+      });
+    });
+    describe('Edge Case Scenario', () => {
+      it('returns 404 when user does not exist', async () => {
+        vi.mocked(userRepository.findById).mockResolvedValue(null);
+        await expect(userController.getById('123')).resolves.toEqual(404);
+      });
+    });
+  });
+});
+```
+
+### example of a unit test
+```ts
+import { vi, describe, it, expect } from 'vitest';
+import * as userService from '../services/user.service';
+import * as userRepository from '../repositories/user.repository';
+
+vi.mock('../repositories/user.repository');
+
+describe('Unit Test for userService.getById', () => {
+  describe('Success Scenario', () => {
+    it('throws not found when user does not exist', async () => {
+      vi.mocked(userRepository.findById).mockResolvedValue(null);
+      await expect(userService.getById('123')).rejects.toThrow('User not found');
+    });
+  });
+  describe('Validation Error Scenario', () => {
+    it('throws validation error when id is not a string', async () => {
+      await expect(userService.getById(123 as unknown as string)).rejects.toThrow('Invalid id');
+    });
+  });
+  describe('Edge Case Scenario', () => {
+    it('throws not found when user does not exist with invalid id', async () => {
+      vi.mocked(userRepository.findById).mockResolvedValue(null);
+      await expect(userService.getById('123')).rejects.toThrow('User not found');
+    });
+  });
+});
+```
+
+## Better Auth Integration
+
+```ts
+import { auth, toNodeHandler } from '@repo/auth';
+
+app.all('/api/auth/*splat', toNodeHandler(auth));
+```

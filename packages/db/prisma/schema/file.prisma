@@ -1,0 +1,26 @@
+// ==========================================
+// File Upload Models
+// ==========================================
+
+model File {
+  id           String    @id @default(cuid())
+  originalName String
+  mimeType     String
+  size         Int
+  bucket       String
+  key          String
+  url          String
+  isPrivate    Boolean   @default(false)
+  entityType   String?   // Polymorphic: table name like "User", "Post", etc.
+  entityId     String?   // Polymorphic: ID of the related entity
+  uploadedById String?
+  metadata     Json?     @default("{}")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  uploadedBy User? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([uploadedById])
+  @@map("files")
+}

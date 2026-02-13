@@ -1,0 +1,572 @@
+{
+  "info": {
+    "_postman_id": "fullstack-app-api-collection",
+    "name": "Fullstack App API",
+    "description": "Complete API collection for the Fullstack App Template",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Sign Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Origin",
+                "value": "{{web_url}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password123\",\n  \"name\": \"John Doe\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/sign-up",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "sign-up"]
+            },
+            "description": "Register a new user account"
+          },
+          "response": []
+        },
+        {
+          "name": "Sign In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.token) {",
+                  "        // Store auth token for Bearer authentication",
+                  "        pm.collectionVariables.set('auth_token', response.token);",
+                  "        console.log('Auth token saved:', response.token);",
+                  "    }",
+                  "    if (response.user && response.user.id) {",
+                  "        // Store user ID for convenience",
+                  "        pm.collectionVariables.set('user_id', response.user.id);",
+                  "        console.log('User ID saved:', response.user.id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Origin",
+                "value": "{{web_url}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"Password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/sign-in/email",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "sign-in", "email"]
+            },
+            "description": "Sign in with email and password. The token from the response will be automatically saved and used for authenticated requests."
+          },
+          "response": []
+        },
+        {
+          "name": "Sign Out",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/sign-out",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "sign-out"]
+            },
+            "description": "Sign out the current user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/auth/session",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "session"]
+            },
+            "description": "Get the current session information"
+          },
+          "response": []
+        }
+      ],
+      "description": "Authentication endpoints"
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users?page=1&pageSize=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "20",
+                  "description": "Items per page (default: 20, max: 100)"
+                }
+              ]
+            },
+            "description": "Get a paginated list of users"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "me"]
+            },
+            "description": "Get the currently authenticated user"
+          },
+          "response": []
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{user_id}}",
+                  "description": "User ID (CUID)"
+                }
+              ]
+            },
+            "description": "Get a specific user by their ID"
+          },
+          "response": []
+        },
+        {
+          "name": "Update Current User",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"image\": \"https://example.com/avatar.jpg\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/users/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "me"]
+            },
+            "description": "Update the currently authenticated user's profile"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/users/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{user_id}}",
+                  "description": "User ID (CUID)"
+                }
+              ]
+            },
+            "description": "Delete a user by ID"
+          },
+          "response": []
+        }
+      ],
+      "description": "User management endpoints"
+    },
+    {
+      "name": "Files",
+      "item": [
+        {
+          "name": "Upload Single File",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "File to upload"
+                },
+                {
+                  "key": "entityType",
+                  "value": "user",
+                  "type": "text",
+                  "description": "Optional: Entity type (e.g., 'user', 'post')"
+                },
+                {
+                  "key": "entityId",
+                  "value": "{{user_id}}",
+                  "type": "text",
+                  "description": "Optional: Entity ID"
+                },
+                {
+                  "key": "isPrivate",
+                  "value": "false",
+                  "type": "text",
+                  "description": "Optional: Whether file is private (true/false)"
+                },
+                {
+                  "key": "metadata",
+                  "value": "{\"description\": \"Example file\"}",
+                  "type": "text",
+                  "description": "Optional: JSON string of metadata"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/files",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files"]
+            },
+            "description": "Upload a single file. For private files (isPrivate=true), the response will automatically include a presigned URL that expires in 1 hour. For public files, the direct URL is returned. Note: If you can't access a file URL directly, use the 'Get Presigned URL' endpoint or 'Get File by ID' endpoint which automatically returns presigned URLs for private files."
+          },
+          "response": []
+        },
+        {
+          "name": "Upload Multiple Files",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "First file (up to 10 files)"
+                },
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": [],
+                  "description": "Second file"
+                },
+                {
+                  "key": "entityType",
+                  "value": "user",
+                  "type": "text",
+                  "description": "Optional: Entity type"
+                },
+                {
+                  "key": "entityId",
+                  "value": "{{user_id}}",
+                  "type": "text",
+                  "description": "Optional: Entity ID"
+                },
+                {
+                  "key": "isPrivate",
+                  "value": "false",
+                  "type": "text",
+                  "description": "Optional: Whether files are private"
+                },
+                {
+                  "key": "metadata",
+                  "value": "{\"description\": \"Multiple files\"}",
+                  "type": "text",
+                  "description": "Optional: JSON string of metadata"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/api/files/multiple",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files", "multiple"]
+            },
+            "description": "Upload multiple files (up to 10)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get File by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/files/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{file_id}}",
+                  "description": "File ID (CUID)"
+                }
+              ]
+            },
+            "description": "Get file information by ID. For private files, this endpoint automatically returns a presigned URL (valid for 1 hour) in the url field. For public files, the direct URL is returned."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Presigned URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/files/:id/presigned?expiresIn=3600",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files", ":id", "presigned"],
+              "query": [
+                {
+                  "key": "expiresIn",
+                  "value": "3600",
+                  "description": "Optional: Expiration time in seconds (default: 3600)"
+                }
+              ],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{file_id}}",
+                  "description": "File ID (CUID)"
+                }
+              ]
+            },
+            "description": "Get a presigned URL for a private file. This endpoint generates a temporary URL (default: 1 hour, configurable via expiresIn query param) that allows access to private files. For public files, the direct URL is returned. Use this if you need a fresh presigned URL or want to customize the expiration time."
+          },
+          "response": []
+        },
+        {
+          "name": "Update File Metadata",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metadata\": {\n    \"description\": \"Updated description\",\n    \"tags\": [\"tag1\", \"tag2\"]\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/files/:id/metadata",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files", ":id", "metadata"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{file_id}}",
+                  "description": "File ID (CUID)"
+                }
+              ]
+            },
+            "description": "Update file metadata (only for files you uploaded)"
+          },
+          "response": []
+        },
+        {
+          "name": "Delete File",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/files/:id",
+              "host": ["{{base_url}}"],
+              "path": ["api", "files", ":id"],
+              "variable": [
+                {
+                  "key": "id",
+                  "value": "{{file_id}}",
+                  "description": "File ID (CUID)"
+                }
+              ]
+            },
+            "description": "Delete a file (only files you uploaded)"
+          },
+          "response": []
+        }
+      ],
+      "description": "File management endpoints"
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if the API server is running"
+          },
+          "response": []
+        }
+      ],
+      "description": "Health check endpoint"
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3001",
+      "type": "string",
+      "description": "API base URL"
+    },
+    {
+      "key": "web_url",
+      "value": "http://localhost:3000",
+      "type": "string",
+      "description": "Web app URL (used for Origin header in auth requests)"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string",
+      "description": "Bearer token from sign-in response. Automatically set after successful sign-in."
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string",
+      "description": "User ID. Automatically set after successful sign-in."
+    },
+    {
+      "key": "file_id",
+      "value": "",
+      "type": "string",
+      "description": "File ID for file operations"
+    }
+  ]
+}
