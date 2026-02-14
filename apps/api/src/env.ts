@@ -24,7 +24,11 @@ export const serverEnvSchema = z.object({
   S3_ACCESS_KEY: z.string().default('minioadmin'),
   S3_SECRET_KEY: z.string().default('minioadmin'),
   S3_BUCKET_NAME: z.string().default('uploads'),
-  S3_USE_SSL: z.coerce.boolean().default(false),
+  S3_USE_SSL: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true' || v === '1'),
   MAX_FILE_SIZE: z.coerce.number().default(10485760), // 10MB in bytes
 
   // Redis (optional: when set, rate limiter uses Redis; when unset, in-memory store)

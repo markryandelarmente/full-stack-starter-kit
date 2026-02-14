@@ -1,5 +1,5 @@
 import { prisma } from '@repo/db';
-import { getS3Client } from '../lib/s3';
+import { getS3Client, ensureBucketExists } from '../lib/s3';
 import { getRedisClient } from '../lib/redis';
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import { validateServerEnv } from '../env';
@@ -40,6 +40,17 @@ export async function checkDatabase(): Promise<ComponentHealth> {
   }
 }
 
+function getS3ErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const err = error as Error & { name?: string; Code?: string };
+    const code = err.Code ?? (err.name !== 'Error' ? err.name : undefined);
+    if (code && code !== 'Unknown') return code;
+    if (err.message && err.message !== 'Unknown') return err.message;
+    return 'S3 connection failed (check endpoint and credentials)';
+  }
+  return 'S3 connection failed';
+}
+
 export async function checkS3(): Promise<ComponentHealth> {
   const start = Date.now();
   try {
@@ -49,9 +60,25 @@ export async function checkS3(): Promise<ComponentHealth> {
       latency: Date.now() - start,
     };
   } catch (error) {
+    const message = getS3ErrorMessage(error);
+    const isBucketMissing = message === 'NotFound' || message === 'NoSuchBucket';
+    if (isBucketMissing) {
+      try {
+        await ensureBucketExists(env.S3_BUCKET_NAME);
+        return {
+          status: 'healthy',
+          latency: Date.now() - start,
+        };
+      } catch (createError) {
+        return {
+          status: 'unhealthy',
+          message: getS3ErrorMessage(createError),
+        };
+      }
+    }
     return {
       status: 'unhealthy',
-      message: error instanceof Error ? error.message : 'S3 connection failed',
+      message,
     };
   }
 }
