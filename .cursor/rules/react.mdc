@@ -37,13 +37,16 @@ src/
 │   └── (auth)/       # Pathless layout group
 │       ├── route.tsx # Auth layout
 │       └── sign-in.tsx
-├── hooks/            # TanStack Query hooks
-│   ├── queries/      # Query and mutation hooks
-│   │   ├── query-keys.ts
-│   │   ├── use-users.ts
-│   │   ├── use-files.ts
-│   │   └── index.ts
-│   └── index.ts
+├── hooks/            # API and TanStack Query hooks
+│   └── api/          # API-domain hooks (feature-based)
+│       ├── users/
+│       │   ├── users-keys.ts    # Query key factory
+│       │   ├── users-queries.ts # Query hooks & fetch functions
+│       │   └── users-mutation.ts
+│       └── files/
+│           ├── files-keys.ts
+│           ├── files-queries.ts
+│           └── files-mutation.ts
 ├── lib/              # Utilities and helpers (app-specific)
 └── types/            # TypeScript types
 ```
@@ -58,7 +61,7 @@ src/
 - Lift state only when necessary
 
 ```tsx
-// Server state: Use query hooks from @/hooks
+// Server state: Use query hooks from @/hooks/api/[domain]
 const { data: user, isLoading } = useCurrentUser();
 const { data: users } = useUsers({ page: 1, pageSize: 10 });
 
@@ -70,22 +73,31 @@ const [isOpen, setIsOpen] = useState(false);
 
 ### Hook Structure
 
-Query hooks are organized in `src/hooks/queries/`:
+API hooks are organized by domain under `src/hooks/api/`. Each domain has its own folder with keys, queries, and mutations:
 
 ```
-src/hooks/
-├── queries/
-│   ├── query-keys.ts    # Centralized query key factory
-│   ├── use-users.ts     # User-related queries & mutations
-│   ├── use-files.ts     # File-related queries & mutations
-│   └── index.ts         # Re-exports all hooks
-└── index.ts             # Main export
+src/hooks/api/
+├── users/
+│   ├── users-keys.ts      # Query key factory (userQueryKeys)
+│   ├── users-queries.ts   # Query hooks & fetch functions
+│   └── users-mutation.ts  # Mutation hooks
+└── files/
+    ├── files-keys.ts
+    ├── files-queries.ts
+    └── files-mutation.ts
 ```
 
-### Using Query Hooks
+- **`[domain]-keys.ts`** – Query key factory for that domain (e.g. `userQueryKeys`, `fileQueryKeys`).
+- **`[domain]-queries.ts`** – Query hooks and exported fetch functions for prefetch/custom usage.
+- **`[domain]-mutation.ts`** – Mutation hooks with cache invalidation.
+
+### Using Query and Mutation Hooks
+
+Import from the domain path; there is no central hooks barrel:
 
 ```tsx
-import { useCurrentUser, useUsers, useUpdateCurrentUser } from '@/hooks';
+import { useCurrentUser, useUsers } from '@/hooks/api/users/users-queries';
+import { useUpdateCurrentUser } from '@/hooks/api/users/users-mutation';
 
 function Profile() {
   // Queries - data is cached and shared across components
@@ -104,85 +116,123 @@ function Profile() {
 }
 ```
 
-### Query Keys Factory
+### Query Keys (per domain)
 
-Always use the centralized query keys from `@/hooks/queries/query-keys.ts`:
+Each domain exposes its own key factory. Use it for cache operations and prefetch:
 
 ```tsx
-import { queryKeys } from '@/hooks';
+import { userQueryKeys } from '@/hooks/api/users/users-keys';
+import { fetchCurrentUser } from '@/hooks/api/users/users-queries';
 
 // For manual cache operations
 const queryClient = useQueryClient();
 
-// Invalidate all user queries
-queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
+// Invalidate list queries
+queryClient.invalidateQueries({ queryKey: userQueryKeys.users() });
 
 // Invalidate specific user
-queryClient.invalidateQueries({ queryKey: queryKeys.users.detail(userId) });
+queryClient.invalidateQueries({ queryKey: userQueryKeys.user(userId) });
 
 // Read from cache
-const cachedUser = queryClient.getQueryData(queryKeys.users.me());
+const cachedUser = queryClient.getQueryData(userQueryKeys.me());
 
-// Prefetch data
+// Prefetch using exported fetch function
 queryClient.prefetchQuery({
-  queryKey: queryKeys.users.me(),
+  queryKey: userQueryKeys.me(),
   queryFn: fetchCurrentUser,
 });
 ```
 
-### Creating New Query Hooks
+### Adding a New API Domain
 
-When adding new query hooks, follow this pattern:
+1. Create `src/hooks/api/[domain]/[domain]-keys.ts`:
 
 ```tsx
-// src/hooks/queries/use-posts.ts
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/lib/api';
-import { queryKeys } from './query-keys';
-import type { Post, ApiError } from '@repo/shared';
+import type { PaginationParams } from '@repo/shared';
 
-// Query hook
-export function usePosts(params?: PaginationParams) {
+const BASE_KEY = 'posts';
+
+export const postQueryKeys = {
+  posts: (params?: PaginationParams) => [BASE_KEY, params] as const,
+  post: (id: string) => [BASE_KEY, id] as const,
+} as const;
+
+export type PostQueryKeys = typeof postQueryKeys;
+```
+
+2. Create `src/hooks/api/[domain]/[domain]-queries.ts` (export fetch functions and query hooks):
+
+```tsx
+import { useQuery, type UseQueryOptions } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api';
+import { postQueryKeys } from './posts-keys';
+import type { Post, PaginatedResponse, PaginationParams, ApiError } from '@repo/shared';
+
+export const fetchPosts = async (params?: PaginationParams): Promise<PaginatedResponse<Post>> => {
+  const searchParams = new URLSearchParams();
+  if (params?.page) searchParams.set('page', String(params.page));
+  if (params?.pageSize) searchParams.set('pageSize', String(params.pageSize));
+  const query = searchParams.toString();
+  const result = await apiClient.get<PaginatedResponse<Post>>(`/posts${query ? `?${query}` : ''}`);
+  if (!result.success) throw result.error;
+  return result.data!;
+};
+
+export function usePosts(
+  params?: PaginationParams,
+  options?: Omit<UseQueryOptions<PaginatedResponse<Post>, ApiError>, 'queryKey' | 'queryFn'>
+) {
   return useQuery({
-    queryKey: queryKeys.posts.list(params),
-    queryFn: async (): Promise<PaginatedResponse<Post>> => {
-      const result = await apiClient.get<PaginatedResponse<Post>>('/posts');
-      if (!result.success) throw result.error;
-      return result.data!;
-    },
+    queryKey: postQueryKeys.posts(params),
+    queryFn: () => fetchPosts(params),
+    ...options,
   });
 }
 
-// Mutation hook with cache invalidation
-export function useCreatePost() {
+export const fetchPost = async (id: string): Promise<Post> => {
+  const result = await apiClient.get<Post>(`/posts/${id}`);
+  if (!result.success) throw result.error;
+  return result.data!;
+};
+
+export function usePost(
+  id: string,
+  options?: Omit<UseQueryOptions<Post, ApiError>, 'queryKey' | 'queryFn'>
+) {
+  return useQuery({
+    queryKey: postQueryKeys.post(id),
+    queryFn: () => fetchPost(id),
+    enabled: !!id,
+    ...options,
+  });
+}
+```
+
+3. Create `src/hooks/api/[domain]/[domain]-mutation.ts` for mutations and invalidate using that domain’s keys:
+
+```tsx
+import { useMutation, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
+import { apiClient } from '@/lib/api';
+import { postQueryKeys } from './posts-keys';
+import type { Post, ApiError } from '@repo/shared';
+
+export function useCreatePost(
+  options?: Omit<UseMutationOptions<Post, ApiError, CreatePostInput>, 'mutationFn'>
+) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (data: CreatePostInput): Promise<Post> => {
+    mutationFn: async (data: CreatePostInput) => {
       const result = await apiClient.post<Post>('/posts', data);
       if (!result.success) throw result.error;
       return result.data!;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.posts.lists() });
+      queryClient.invalidateQueries({ queryKey: postQueryKeys.posts() });
     },
+    ...options,
   });
 }
-```
-
-Add query keys to `query-keys.ts`:
-
-```tsx
-export const queryKeys = {
-  // ... existing keys
-  posts: {
-    all: ['posts'] as const,
-    lists: () => [...queryKeys.posts.all, 'list'] as const,
-    list: (params?: PaginationParams) => [...queryKeys.posts.lists(), params] as const,
-    details: () => [...queryKeys.posts.all, 'detail'] as const,
-    detail: (id: string) => [...queryKeys.posts.details(), id] as const,
-  },
-};
 ```
 
 ### Handling Mutation Errors
