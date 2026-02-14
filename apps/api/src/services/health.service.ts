@@ -1,5 +1,6 @@
 import { prisma } from '@repo/db';
 import { getS3Client } from '../lib/s3';
+import { getRedisClient } from '../lib/redis';
 import { HeadBucketCommand } from '@aws-sdk/client-s3';
 import { validateServerEnv } from '../env';
 
@@ -13,7 +14,7 @@ export interface HealthStatus {
   checks: {
     database: ComponentHealth;
     s3: ComponentHealth;
-    // Add more checks as needed (redis, s3, etc.)
+    redis: ComponentHealth;
   };
 }
 
@@ -55,12 +56,42 @@ export async function checkS3(): Promise<ComponentHealth> {
   }
 }
 
+export async function checkRedis(): Promise<ComponentHealth> {
+  if (!env.REDIS_URL) {
+    return {
+      status: 'healthy',
+      message: 'Redis not configured (using in-memory rate limit)',
+    };
+  }
+  const start = Date.now();
+  try {
+    const client = await getRedisClient();
+    if (!client) {
+      return {
+        status: 'healthy',
+        message: 'Redis not configured (using in-memory rate limit)',
+      };
+    }
+    await client.ping();
+    return {
+      status: 'healthy',
+      latency: Date.now() - start,
+    };
+  } catch (error) {
+    return {
+      status: 'unhealthy',
+      message: error instanceof Error ? error.message : 'Redis connection failed',
+    };
+  }
+}
+
 export async function getHealthStatus(): Promise<HealthStatus> {
   const database = await checkDatabase();
   const s3 = await checkS3();
+  const redis = await checkRedis();
 
   // Aggregate overall status
-  const allChecks = [database, s3];
+  const allChecks = [database, s3, redis];
   const hasUnhealthy = allChecks.some((c) => c.status === 'unhealthy');
 
   return {
@@ -71,6 +102,7 @@ export async function getHealthStatus(): Promise<HealthStatus> {
     checks: {
       database,
       s3,
+      redis,
     },
   };
 }

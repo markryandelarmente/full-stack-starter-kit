@@ -26,6 +26,13 @@ export const serverEnvSchema = z.object({
   S3_BUCKET_NAME: z.string().default('uploads'),
   S3_USE_SSL: z.coerce.boolean().default(false),
   MAX_FILE_SIZE: z.coerce.number().default(10485760), // 10MB in bytes
+
+  // Redis (optional: when set, rate limiter uses Redis; when unset, in-memory store)
+  REDIS_URL: z.string().url().optional(),
+
+  // Rate limit (optional tuning)
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().default(15 * 60 * 1000), // 15 minutes
+  RATE_LIMIT_MAX: z.coerce.number().default(100),
 });
 
 export type ServerEnv = z.infer<typeof serverEnvSchema>;

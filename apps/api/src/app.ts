@@ -5,9 +5,10 @@ import { auth, toNodeHandler } from '@repo/auth';
 import { apiRouter } from './routes';
 import { errorHandler } from './middleware/error-handler';
 import { requestLogger } from './middleware/request-logger';
+import { createRateLimiter } from './middleware/rate-limiter';
 import { getHealthStatus } from './services/health.service';
 
-export function createApp(corsOrigin?: string): express.Application {
+export async function createApp(corsOrigin?: string): Promise<express.Application> {
   const app = express();
 
   // Security middleware
@@ -22,6 +23,10 @@ export function createApp(corsOrigin?: string): express.Application {
   // Request logging
   app.use(requestLogger);
 
+  // Rate limiting (Redis when REDIS_URL set, in-memory otherwise)
+  const rateLimiter = await createRateLimiter();
+  app.use(rateLimiter);
+
   // Health check
   app.get('/health', async (_req, res) => {
     const health = await getHealthStatus();
@@ -29,7 +34,7 @@ export function createApp(corsOrigin?: string): express.Application {
   });
 
   // Auth routes - handle all /api/auth/* routes
-  app.all("/api/auth/*splat", toNodeHandler(auth))
+  app.all('/api/auth/*splat', toNodeHandler(auth));
 
   // Body parsing middleware
   app.use(express.urlencoded({ extended: true }));

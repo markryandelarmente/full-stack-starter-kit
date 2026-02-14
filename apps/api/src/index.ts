@@ -7,7 +7,7 @@ const env = validateServerEnv();
 
 initLogger(env);
 
-const app = createApp(env.BETTER_AUTH_URL);
+const app = await createApp(env.BETTER_AUTH_URL);
 
 // Start server
 app.listen(env.PORT, () => {
